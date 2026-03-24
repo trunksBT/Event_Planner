@@ -1,6 +1,7 @@
 import calendar
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.formatting.rule import FormulaRule
 from openpyxl.utils import get_column_letter
 
 wb = Workbook()
@@ -10,11 +11,16 @@ wb = Workbook()
 # ============================================================
 YEAR = 2026
 
-MONTHS = [(8, "August"), (9, "September")]
+MONTHS = [
+    (8, "August", [31]),     # 3rd element: days from previous month to include
+    (9, "September", []),
+]
 
 PEOPLE = [
     "Alice", "Bob", "Charlie", "Diana", "Eve",
     "Frank", "Grace", "Hank", "Ivy", "Jack",
+    "Karen", "Leo", "Mia", "Noah", "Olivia",
+    "Paul", "Quinn", "Rita", "Sam", "Tina",
 ]
 
 CRITICAL = ["Alice", "Bob", "Diana", "Frank"]
@@ -57,6 +63,8 @@ fill_unavail = PatternFill("solid", fgColor="FFCDD2")
 fill_crit_marker = PatternFill("solid", fgColor="FFD966")
 fill_result_hdr = PatternFill("solid", fgColor="4472C4")
 fill_best = PatternFill("solid", fgColor="C6EFCE")
+fill_second_best = PatternFill("solid", fgColor="70AD47")
+fill_wknd_bad = PatternFill("solid", fgColor="FFC7CE")
 
 center = Alignment(horizontal="center", vertical="center", wrap_text=True)
 left_a = Alignment(horizontal="left", vertical="center")
@@ -68,21 +76,27 @@ thin = Border(
 # ============================================================
 # BUILD EACH SHEET
 # ============================================================
-for idx, (month_num, month_name) in enumerate(MONTHS):
+for idx, (month_num, month_name, prev_days) in enumerate(MONTHS):
     ws = wb.active if idx == 0 else wb.create_sheet()
     ws.title = month_name
     num_days = calendar.monthrange(YEAR, month_num)[1]
 
-    DATA_COL_START = 3   # col C = day 1
+    # Build full list of days: optional previous-month days + current month
+    prev_month = month_num - 1 if month_num > 1 else 12
+    sheet_days = [(prev_month, d) for d in prev_days] + \
+                 [(month_num, d) for d in range(1, num_days + 1)]
+    total_cols = len(sheet_days)
+
+    DATA_COL_START = 3   # col C = first day
 
     ws.freeze_panes = "C5"
     ws.column_dimensions["A"].width = 16
     ws.column_dimensions["B"].width = 11
-    for d in range(1, num_days + 1):
-        ws.column_dimensions[get_column_letter(DATA_COL_START + d - 1)].width = 6.5
+    for di in range(total_cols):
+        ws.column_dimensions[get_column_letter(DATA_COL_START + di)].width = 6.5
 
     # ---------- ROW 1 — Title ----------
-    last_col = DATA_COL_START + num_days - 1
+    last_col = DATA_COL_START + total_cols - 1
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
     tc = ws.cell(row=1, column=1,
                  value=f"Event Availability Planner  —  {month_name} {YEAR}")
@@ -109,9 +123,9 @@ for idx, (month_num, month_name) in enumerate(MONTHS):
         cell.alignment = center
         cell.border = thin
 
-    for d in range(1, num_days + 1):
-        col = DATA_COL_START + d - 1
-        dow = calendar.weekday(YEAR, month_num, d)
+    for di, (dm, dd) in enumerate(sheet_days):
+        col = DATA_COL_START + di
+        dow = calendar.weekday(YEAR, dm, dd)
         cell = ws.cell(row=3, column=col, value=DAY_ABBR[dow])
         cell.font = white_sm
         cell.fill = fill_wknd_hdr if dow in WEEKEND_DAYS else fill_hdr
@@ -125,10 +139,10 @@ for idx, (month_num, month_name) in enumerate(MONTHS):
     ws.cell(row=4, column=2).fill = fill_crit_marker
     ws.cell(row=4, column=2).border = thin
 
-    for d in range(1, num_days + 1):
-        col = DATA_COL_START + d - 1
-        dow = calendar.weekday(YEAR, month_num, d)
-        cell = ws.cell(row=4, column=col, value=d)
+    for di, (dm, dd) in enumerate(sheet_days):
+        col = DATA_COL_START + di
+        dow = calendar.weekday(YEAR, dm, dd)
+        cell = ws.cell(row=4, column=col, value=dd)
         cell.font = white_font
         cell.fill = fill_wknd_hdr if dow in WEEKEND_DAYS else fill_hdr
         cell.alignment = center
@@ -142,32 +156,24 @@ for idx, (month_num, month_name) in enumerate(MONTHS):
         is_crit = person in CRITICAL
 
         nc = ws.cell(row=row, column=1, value=person)
-        nc.font = critical_font if is_crit else normal_font
+        nc.font = normal_font
         nc.alignment = left_a
         nc.border = thin
-        if is_crit:
-            nc.fill = fill_critical_row
 
         cc = ws.cell(row=row, column=2, value="\u2605" if is_crit else "")
         cc.font = critical_font
         cc.alignment = center
         cc.border = thin
-        if is_crit:
-            cc.fill = fill_critical_row
 
-        for d in range(1, num_days + 1):
-            col = DATA_COL_START + d - 1
-            dow = calendar.weekday(YEAR, month_num, d)
+        for di, (dm, dd) in enumerate(sheet_days):
+            col = DATA_COL_START + di
+            dow = calendar.weekday(YEAR, dm, dd)
             cell = ws.cell(row=row, column=col)
             cell.alignment = center
             cell.font = normal_font
             cell.border = thin
-            if dow in WEEKEND_DAYS and is_crit:
-                cell.fill = fill_crit_wknd
-            elif dow in WEEKEND_DAYS:
+            if dow in WEEKEND_DAYS:
                 cell.fill = fill_wknd_col
-            elif is_crit:
-                cell.fill = fill_critical_row
 
         ws.row_dimensions[row].height = 22
 
@@ -179,6 +185,8 @@ for idx, (month_num, month_name) in enumerate(MONTHS):
     R_CRIT_UN = R_UNAVAIL + 1
     R_FREE    = R_CRIT_UN + 1
     R_BEST    = R_FREE + 1
+    R_CRIT_WK = R_BEST + 1   # hidden: critical unavail sum per weekend column
+    R_HELPER  = R_BEST + 2   # hidden: total unavail sum per group (for ranking)
 
     # Analysis header bar
     ws.merge_cells(start_row=A_TITLE, start_column=1, end_row=A_TITLE, end_column=2)
@@ -206,34 +214,33 @@ for idx, (month_num, month_name) in enumerate(MONTHS):
         ws.cell(row=r, column=2).fill = fill_legend_bg
         ws.cell(row=r, column=2).border = thin
 
-    # Identify critical-person rows
-    crit_rows = [FIRST_P + pi for pi, p in enumerate(PEOPLE) if p in CRITICAL]
+    # Range references for dynamic critical formulas (reads ★ from column B)
+    crit_range = f"$B${FIRST_P}:$B${LAST_P}"
 
     # Group weekend days into whole weekends (e.g., Fri+Sat+Sun = one weekend)
-    wknd_groups = []      # list of lists: [(day, col_letter), ...]
-    day_to_group = {}     # day number → group index
+    wknd_groups = []      # list of lists of column letters
+    di_to_group = {}      # sheet_days index → group index
     current_group = []
-    for d in range(1, num_days + 1):
-        if calendar.weekday(YEAR, month_num, d) in WEEKEND_DAYS:
-            current_group.append((d, get_column_letter(DATA_COL_START + d - 1)))
+    for di, (dm, dd) in enumerate(sheet_days):
+        if calendar.weekday(YEAR, dm, dd) in WEEKEND_DAYS:
+            current_group.append(get_column_letter(DATA_COL_START + di))
+            di_to_group[di] = len(wknd_groups)
         else:
             if current_group:
                 wknd_groups.append(current_group)
                 current_group = []
     if current_group:
         wknd_groups.append(current_group)
-    # Sum of unavailable per weekend group & mapping day→group
+    # Sum of unavailable / critical unavailable per weekend group
     group_sums = []
-    for gi, group in enumerate(wknd_groups):
-        group_sums.append("+".join(f"{cl}{R_UNAVAIL}" for _, cl in group))
-        for d, _ in group:
-            day_to_group[d] = gi
-    min_wknd = "MIN(" + ",".join(group_sums) + ")"
-
-    for d in range(1, num_days + 1):
-        col = DATA_COL_START + d - 1
+    crit_group_sums = []
+    for group in wknd_groups:
+        group_sums.append("+".join(f"{cl}{R_UNAVAIL}" for cl in group))
+        crit_group_sums.append("+".join(f"{cl}{R_CRIT_UN}" for cl in group))
+    for di, (dm, dd) in enumerate(sheet_days):
+        col = DATA_COL_START + di
         cl = get_column_letter(col)
-        dow = calendar.weekday(YEAR, month_num, d)
+        dow = calendar.weekday(YEAR, dm, dd)
         is_wknd = dow in WEEKEND_DAYS
 
         # Extend the header bar across
@@ -246,9 +253,9 @@ for idx, (month_num, month_name) in enumerate(MONTHS):
         c1.font = normal_font; c1.alignment = center; c1.border = thin
         if is_wknd: c1.fill = fill_wknd_col
 
-        # Critical unavailable (sum of IFs for each critical row)
-        parts = [f'IF({cl}{r}="{UNAVAILABLE_MARK}",1,0)' for r in crit_rows]
-        f2 = "=" + "+".join(parts)
+        # Critical unavailable (dynamic — counts people with ★ in col B and X in this day)
+        day_range = f"{cl}{FIRST_P}:{cl}{LAST_P}"
+        f2 = f'=SUMPRODUCT(({crit_range}="\u2605")*({day_range}="{UNAVAILABLE_MARK}"))'
         c2 = ws.cell(row=R_CRIT_UN, column=col, value=f2)
         c2.font = normal_font; c2.alignment = center; c2.border = thin
         if is_wknd: c2.fill = fill_wknd_col
@@ -260,21 +267,55 @@ for idx, (month_num, month_name) in enumerate(MONTHS):
         c3.font = green_font; c3.alignment = center; c3.border = thin
         if is_wknd: c3.fill = fill_wknd_col
 
-        # Best weekend — highlight days belonging to the weekend with fewest unavailable
+        # Best weekend — cell holds the weekend group sum (hidden by ;;; format);
+        # conditional formatting colors best/2nd best (green) or critical-blocked (red)
         if is_wknd:
-            gi = day_to_group[d]
-            group = wknd_groups[gi]
-            label = f"{group[0][0]}-{group[-1][0]} {month_name}"
-            f4 = f'=IF({group_sums[gi]}={min_wknd},"{label}","")'
-            c4 = ws.cell(row=R_BEST, column=col, value=f4)
-            c4.font = Font(name="Arial", bold=True, size=10, color="1B7A2B")
-            c4.alignment = center; c4.border = thin; c4.fill = fill_best
+            gi = di_to_group[di]
+            c4 = ws.cell(row=R_BEST, column=col, value=f"={group_sums[gi]}")
+            c4.number_format = ';;;'
+            c4.alignment = center; c4.border = thin; c4.fill = fill_wknd_col
+            # Hidden row: critical unavailable sum for this weekend
+            ck = ws.cell(row=R_CRIT_WK, column=col, value=f"={crit_group_sums[gi]}")
+            ck.number_format = ';;;'
         else:
             c4 = ws.cell(row=R_BEST, column=col)
             c4.fill = fill_legend_bg; c4.border = thin
 
+    for gi in range(len(wknd_groups)):
+        hcol = DATA_COL_START + gi
+        ws.cell(row=R_HELPER, column=hcol, value=f"={group_sums[gi]}").number_format = ';;;'
+    ws.row_dimensions[R_CRIT_WK].hidden = True
+    ws.row_dimensions[R_HELPER].hidden = True
+
+    # Conditional formatting on R_BEST row (color = rank)
+    h_start = f"${get_column_letter(DATA_COL_START)}${R_HELPER}"
+    h_end = f"${get_column_letter(DATA_COL_START + len(wknd_groups) - 1)}${R_HELPER}"
+    h_range = f"{h_start}:{h_end}"
+    cf_first = get_column_letter(DATA_COL_START)
+    cf_last = get_column_letter(last_col)
+    cf_range = f"{cf_first}{R_BEST}:{cf_last}{R_BEST}"
+    ref = f"{cf_first}{R_BEST}"
+    # Second-best = SMALL(helper, k) where k skips all cells tied for MIN
+    second_val = f'SMALL({h_range},COUNTIF({h_range},MIN({h_range}))+1)'
+    crit_ref = f"{cf_first}{R_CRIT_WK}"  # same column, shifts with CF range
+    # Rule 1 (highest priority): critical person unavailable → red
+    ws.conditional_formatting.add(cf_range, FormulaRule(
+        formula=[f'AND(ISNUMBER({ref}),{crit_ref}>0)'],
+        fill=fill_wknd_bad, stopIfTrue=True,
+    ))
+    # Rule 2: best weekend → light green
+    ws.conditional_formatting.add(cf_range, FormulaRule(
+        formula=[f'AND(ISNUMBER({ref}),{ref}=MIN({h_range}))'],
+        fill=fill_best, stopIfTrue=True,
+    ))
+    # Rule 3: second best → dark green
+    ws.conditional_formatting.add(cf_range, FormulaRule(
+        formula=[f'AND(ISNUMBER({ref}),IFERROR({second_val},FALSE)>MIN({h_range}),{ref}=IFERROR({second_val},FALSE))'],
+        fill=fill_second_best,
+    ))
+
     # ---------- LEGEND ----------
-    LR = R_BEST + 3
+    LR = R_BEST + 5
     ws.merge_cells(start_row=LR, start_column=1, end_row=LR, end_column=7)
     lg = ws.cell(row=LR, column=1, value="LEGEND")
     lg.font = Font(name="Arial", bold=True, size=11)
@@ -285,12 +326,35 @@ for idx, (month_num, month_name) in enumerate(MONTHS):
          fill_unavail, red_x_font),
         (LR+2, "(empty)", "Person IS available (or hasn't responded yet)",
          None, normal_font),
-        (LR+3, "\u2605", "Critical person — event cannot happen without them",
+        (LR+3, "\u2605",
+         'Critical person — add/remove \u2605 in the "Critical?" column to update analysis',
          fill_crit_marker, critical_font),
         (LR+4, "Shaded cols", f"Weekend columns ({weekend_label()}) — highlighted for scanning",
          fill_wknd_col, normal_font),
-        (LR+5, "\u2713  Green row", "All critical members are free — best candidate dates",
-         fill_best, green_font),
+    ]
+    # Analysis explanation entries
+    legend += [
+        (LR+6, "ANALYSIS", "", fill_result_hdr,
+         Font(name="Arial", bold=True, size=10, color="FFFFFF")),
+        (LR+7, "Unavail total",
+         f'Counts how many people marked "{UNAVAILABLE_MARK}" on each day',
+         fill_legend_bg, normal_font),
+        (LR+8, "Critical unavail",
+         'Counts unavailable people who have \u2605 in column B (editable in Excel)',
+         fill_legend_bg, normal_font),
+        (LR+9, "\u2713 / \u2717",
+         "All critical free? \u2713 = no critical person is unavailable, \u2717 = at least one is",
+         fill_legend_bg, green_font),
+        (LR+10, "Light green",
+         "Best weekend — sums unavailable across all days in each weekend (e.g. Fri+Sat+Sun)."
+         " The weekend with the lowest total gets light green — most people can attend",
+         fill_best, Font(name="Arial", bold=True, size=10, color="1B7A2B")),
+        (LR+11, "Dark green",
+         "Second best weekend — the next-best option if the best weekend doesn't work out",
+         fill_second_best, Font(name="Arial", bold=True, size=10, color="FFFFFF")),
+        (LR+12, "Red",
+         "A critical person (\u2605) is unavailable during this weekend — not recommended",
+         fill_wknd_bad, Font(name="Arial", bold=True, size=10, color="C00000")),
     ]
     for r, sym, desc, fill, fnt in legend:
         cs = ws.cell(row=r, column=1, value=sym)
@@ -301,7 +365,7 @@ for idx, (month_num, month_name) in enumerate(MONTHS):
         cd.font = normal_font; cd.alignment = left_a; cd.border = thin
 
     # ---------- CONFIG FOOTER ----------
-    CFG = LR + 7
+    CFG = LR + 14
     ws.merge_cells(start_row=CFG, start_column=1, end_row=CFG, end_column=10)
     ws.cell(row=CFG, column=1,
             value=f"Config: Weekend = {weekend_label()} | "
