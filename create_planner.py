@@ -195,7 +195,7 @@ for idx, (month_num, month_name) in enumerate(MONTHS):
         (R_UNAVAIL, "Unavailable total"),
         (R_CRIT_UN, "Critical unavail"),
         (R_FREE,    "All critical free?"),
-        (R_BEST,    "Best weekend day?"),
+        (R_BEST,    "Best weekend?"),
     ]:
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
         c = ws.cell(row=r, column=1, value=lbl)
@@ -208,6 +208,27 @@ for idx, (month_num, month_name) in enumerate(MONTHS):
 
     # Identify critical-person rows
     crit_rows = [FIRST_P + pi for pi, p in enumerate(PEOPLE) if p in CRITICAL]
+
+    # Group weekend days into whole weekends (e.g., Fri+Sat+Sun = one weekend)
+    wknd_groups = []      # list of lists: [(day, col_letter), ...]
+    day_to_group = {}     # day number → group index
+    current_group = []
+    for d in range(1, num_days + 1):
+        if calendar.weekday(YEAR, month_num, d) in WEEKEND_DAYS:
+            current_group.append((d, get_column_letter(DATA_COL_START + d - 1)))
+        else:
+            if current_group:
+                wknd_groups.append(current_group)
+                current_group = []
+    if current_group:
+        wknd_groups.append(current_group)
+    # Sum of unavailable per weekend group & mapping day→group
+    group_sums = []
+    for gi, group in enumerate(wknd_groups):
+        group_sums.append("+".join(f"{cl}{R_UNAVAIL}" for _, cl in group))
+        for d, _ in group:
+            day_to_group[d] = gi
+    min_wknd = "MIN(" + ",".join(group_sums) + ")"
 
     for d in range(1, num_days + 1):
         col = DATA_COL_START + d - 1
@@ -239,10 +260,12 @@ for idx, (month_num, month_name) in enumerate(MONTHS):
         c3.font = green_font; c3.alignment = center; c3.border = thin
         if is_wknd: c3.fill = fill_wknd_col
 
-        # Best weekend day — only filled for weekend columns
+        # Best weekend — highlight days belonging to the weekend with fewest unavailable
         if is_wknd:
-            day_label = f"{DAY_ABBR[dow]} {d}"
-            f4 = f'=IF({crit_cell}=0,"{day_label}","")'
+            gi = day_to_group[d]
+            group = wknd_groups[gi]
+            label = f"{group[0][0]}-{group[-1][0]} {month_name}"
+            f4 = f'=IF({group_sums[gi]}={min_wknd},"{label}","")'
             c4 = ws.cell(row=R_BEST, column=col, value=f4)
             c4.font = Font(name="Arial", bold=True, size=10, color="1B7A2B")
             c4.alignment = center; c4.border = thin; c4.fill = fill_best
